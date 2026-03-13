@@ -121,3 +121,18 @@ def add_plot_scale_args(parser: argparse.ArgumentParser) -> None:
         help="Use a log / dB display scale.",
     )
     parser.set_defaults(plot_scale="linear")
+
+
+def add_peak_integration_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--integration-window-width",
+        type=float,
+        default=0.1,
+        help="Half-width in Hz for the peak-integration windows. Default: 0.1",
+    )
+    parser.add_argument(
+        "--normalization-multiplier",
+        type=float,
+        default=4.0,
+        help="ROI padding multiplier applied to the integration window width. Default: 4",
+    )

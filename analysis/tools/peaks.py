@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import numpy as np
+
 
 def load_peaks_csv(path: str | Path) -> list[float]:
     path = Path(path)
@@ -28,6 +30,20 @@ def load_peaks_csv(path: str | Path) -> list[float]:
         raise ValueError("No valid positive floating point peaks found in CSV")
 
     return peaks
+
+
+def assert_peaks_strictly_increasing(peaks: list[float] | np.ndarray) -> np.ndarray:
+    peaks_arr = np.asarray(peaks, dtype=float)
+    if peaks_arr.ndim != 1 or peaks_arr.size == 0:
+        raise ValueError("Peaks must be a non-empty 1D sequence")
+    if not np.all(np.isfinite(peaks_arr)):
+        raise ValueError("Peaks must all be finite")
+    if np.any(peaks_arr <= 0):
+        raise ValueError("Peaks must all be positive")
+    diffs = np.diff(peaks_arr)
+    if np.any(diffs <= 0):
+        raise ValueError("CSV peaks must be strictly increasing from lowest to highest")
+    return peaks_arr
 
 
 def select_active_peak_indices(

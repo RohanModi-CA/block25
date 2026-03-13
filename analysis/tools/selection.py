@@ -112,7 +112,7 @@ def _build_site_signal_records_for_dataset(
     track2: Track2Dataset,
 ) -> list[SignalRecord]:
     x_positions = np.asarray(track2.x_positions, dtype=float)
-    n_frames, n_blocks = x_positions.shape
+    _, n_blocks = x_positions.shape
     n_pairs = max(0, n_blocks - 1)
 
     remaining_local_bonds = [i for i in range(n_pairs) if i not in set(selection.discards)]
@@ -184,6 +184,26 @@ def build_configured_bond_signals(
             seen_ids.add(record.entity_id)
 
     return records
+
+
+def build_grouped_configured_bond_signals(
+    config: OrderedDict[str, DatasetSelection],
+    *,
+    track_data_root: str | None = None,
+) -> OrderedDict[int, list[SignalRecord]]:
+    grouped: OrderedDict[int, list[SignalRecord]] = OrderedDict()
+
+    for dataset_name, selection in config.items():
+        if not selection.include:
+            continue
+
+        track2 = load_track2_dataset(dataset=dataset_name, track_data_root=track_data_root)
+        dataset_records = _build_bond_signal_records_for_dataset(dataset_name, selection, track2)
+
+        for record in dataset_records:
+            grouped.setdefault(int(record.entity_id), []).append(record)
+
+    return grouped
 
 
 def build_configured_site_signals(

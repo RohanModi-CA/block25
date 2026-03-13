@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
-from tools.models import AverageSpectrumResult, PairFrequencyAnalysisResult
+from tools.models import AverageSpectrumResult, PairFrequencyAnalysisResult, SiteAmplitudeAnalysisResult
 from .common import centers_to_edges, colormap_name, robust_nonnegative_norm
 from .indexed import overlay_indexed_points
 
@@ -369,4 +369,47 @@ def plot_average_spectrum(
         ax.set_title(title or "Average FFT")
 
     fig.tight_layout()
+    return fig
+
+
+def plot_site_amplitude_previews(
+    result: SiteAmplitudeAnalysisResult,
+    *,
+    title: str | None = None,
+):
+    if len(result.bonds) == 0:
+        raise ValueError("No bond spectra available to preview")
+
+    nrows = len(result.bonds)
+    fig, axes = plt.subplots(
+        nrows,
+        1,
+        figsize=(11, 2.8 * nrows),
+        sharex=True,
+        constrained_layout=True,
+    )
+    if nrows == 1:
+        axes = [axes]
+
+    for ax, bond in zip(axes, result.bonds):
+        ax.plot(bond.roi_freq, bond.roi_normalized_amplitude, linewidth=1.5)
+        ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.35)
+
+        for peak in bond.peak_integrals:
+            ax.axvspan(peak.low_hz, peak.high_hz, alpha=0.12)
+            ax.axvline(peak.peak_hz, linestyle="--", linewidth=0.9, alpha=0.4, color="black")
+
+        ax.set_ylabel("Norm. Amp.")
+        ax.set_title(
+            f"Bond {bond.display_bond_index} | contributors={len(bond.contributors)} | "
+            f"area={bond.normalization_integral:.6g}"
+        )
+        ax.grid(True, alpha=0.3)
+
+    axes[-1].set_xlabel("Frequency (Hz)")
+    axes[-1].set_xlim(result.roi_low, result.roi_high)
+
+    if title is not None:
+        fig.suptitle(title, fontsize=14)
+
     return fig

@@ -31,6 +31,7 @@ analysis/
 │   ├── peaks.py
 │   ├── selection.py
 │   ├── signal.py
+│   ├── site_amplitudes.py
 │   └── spectral.py
 └── viz/
     ├── avg_fft.py
@@ -39,6 +40,7 @@ analysis/
     ├── localize_sitepeaks.py
     ├── see_fft.py
     ├── see_positions.py
+    ├── see_site_amplitudes.py
     └── spacing_timeseries.py
 ```
 
@@ -52,6 +54,8 @@ python3 viz/avg_fft.py configs/datasets.json --normalize relative
 python3 viz/avg_fft_sites.py configs/datasets.json peaks.csv --normalize relative
 python3 viz/localize_peaks.py configs/datasets.json peaks.csv --normalize relative
 python3 viz/localize_sitepeaks.py configs/datasets.json peaks.csv --normalize relative
+python3 viz/see_site_amplitudes.py configs/datasets.json peaks.csv
+python3 viz/see_site_amplitudes.py configs/datasets.json peaks.csv --preview
 python3 viz/see_positions.py IMG_0584 --framestrip
 python3 viz/spacing_timeseries.py IMG_0584
 ```
@@ -68,3 +72,4 @@ If the sibling `../track/data/` location is not correct, pass:
 - The old Track3 analysis file is no longer required for FFT / localization.
 - `avg_fft_sites.py` is the dedicated replacement for the old overlay behavior
   that lived in `avg_fft2.py`.
+- `see_site_amplitudes.py --phase-reconstruction` is reserved but not yet implemented.

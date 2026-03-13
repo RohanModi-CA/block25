@@ -106,6 +106,15 @@ class AverageSpectrumResult:
 
 
 @dataclass(frozen=True)
+class AveragedAmplitudeSpectrum:
+    freq_grid: np.ndarray
+    mean_amplitude: np.ndarray
+    freq_low: float
+    freq_high: float
+    contributors: list[SpectrumContribution]
+
+
+@dataclass(frozen=True)
 class PairFrequencyAnalysisResult:
     pair_index: int
     label: str
@@ -123,3 +132,40 @@ class LocalizationProfile:
     entity_ids: np.ndarray
     mean_amplitudes: np.ndarray
     std_amplitudes: np.ndarray
+
+
+@dataclass(frozen=True)
+class PeakWindowIntegral:
+    peak_hz: float
+    low_hz: float
+    high_hz: float
+    integrated_amplitude: float
+
+
+@dataclass(frozen=True)
+class BondSiteAmplitudeResult:
+    bond_id: int
+    display_bond_index: int
+    contributors: list[SpectrumContribution]
+    freq_grid: np.ndarray
+    mean_amplitude: np.ndarray
+    roi_low: float
+    roi_high: float
+    roi_freq: np.ndarray
+    roi_mean_amplitude: np.ndarray
+    roi_detrended_amplitude: np.ndarray
+    roi_shifted_amplitude: np.ndarray
+    roi_normalized_amplitude: np.ndarray
+    normalization_integral: float
+    peak_integrals: list[PeakWindowIntegral]
+
+
+@dataclass(frozen=True)
+class SiteAmplitudeAnalysisResult:
+    peaks: np.ndarray
+    integration_window_width: float
+    normalization_multiplier: float
+    roi_low: float
+    roi_high: float
+    bonds: list[BondSiteAmplitudeResult]
+    profiles: list[LocalizationProfile]

@@ -6,12 +6,20 @@ import numpy as np
 
 from .models import (
     AverageSpectrumResult,
+    AveragedAmplitudeSpectrum,
     PairFrequencyAnalysisResult,
     SignalRecord,
     SpectrumContribution,
     SpacingDataset,
 )
 from .signal import compute_complex_spectrogram, compute_one_sided_fft, preprocess_signal
+
+
+ABSOLUTE_ZERO_TOL = 1e-10
+
+
+def is_close_to_zero(value: float, *, tol: float = ABSOLUTE_ZERO_TOL) -> bool:
+    return (not np.isfinite(value)) or (abs(float(value)) <= float(tol))
 
 
 def compute_fft_contributions(
@@ -157,23 +165,52 @@ def interp_amplitude(freq_src: np.ndarray, amp_src: np.ndarray, freq_dst: np.nda
     return np.interp(freq_dst, freq_src, amp_src)
 
 
+def slice_spectrum_window(freq: np.ndarray, amp: np.ndarray, low: float, high: float) -> tuple[np.ndarray, np.ndarray]:
+    freq = np.asarray(freq, dtype=float)
+    amp = np.asarray(amp, dtype=float)
+
+    if freq.ndim != 1 or amp.ndim != 1 or freq.size != amp.size:
+        raise ValueError("freq and amp must be 1D arrays of equal length")
+    if freq.size < 2:
+        raise ValueError("Need at least two spectrum samples")
+    if not np.all(np.isfinite(freq)) or not np.all(np.isfinite(amp)):
+        raise ValueError("freq and amp must be finite")
+    if high <= low:
+        raise ValueError("Window high must be greater than low")
+    if low < freq[0] or high > freq[-1]:
+        raise ValueError(
+            f"Requested window [{low:.6g}, {high:.6g}] Hz lies outside supported range "
+            f"[{freq[0]:.6g}, {freq[-1]:.6g}] Hz"
+        )
+
+    interior_mask = (freq > low) & (freq < high)
+    interior_freq = freq[interior_mask]
+    interior_amp = amp[interior_mask]
+
+    edge_freq = np.array([low, high], dtype=float)
+    edge_amp = np.interp(edge_freq, freq, amp)
+
+    if interior_freq.size == 0:
+        window_freq = edge_freq
+        window_amp = edge_amp
+    else:
+        window_freq = np.concatenate(([low], interior_freq, [high]))
+        window_amp = np.concatenate(([edge_amp[0]], interior_amp, [edge_amp[1]]))
+
+    if window_freq.size < 2:
+        raise ValueError("Window extraction produced too few samples")
+
+    return window_freq, window_amp
+
+
 def integral_over_window(freq: np.ndarray, amp: np.ndarray, low: float, high: float) -> float:
-    mask = (freq >= low) & (freq <= high)
-    if np.count_nonzero(mask) < 2:
-        return 0.0
-    return float(np.trapezoid(amp[mask], freq[mask]))
-
-
-def denominator_too_small(denom: float, amp: np.ndarray, low: float, high: float) -> bool:
-    width = max(high - low, 1e-12)
-    amp_scale = float(np.nanmax(np.abs(amp))) if amp.size > 0 else 0.0
-    tol = 1e4 * np.finfo(float).eps * max(1.0, amp_scale * width)
-    return (not np.isfinite(denom)) or (abs(denom) <= tol)
+    window_freq, window_amp = slice_spectrum_window(freq, amp, low, high)
+    return float(np.trapz(window_amp, window_freq))
 
 
 def normalize_spectrum(freq, amp, *, norm_low: float, norm_high: float) -> np.ndarray | None:
     denom = integral_over_window(freq, amp, norm_low, norm_high)
-    if denominator_too_small(denom, amp, norm_low, norm_high):
+    if is_close_to_zero(denom):
         return None
     return amp / denom
 
@@ -210,6 +247,34 @@ def average_spectra(normalized_stack: np.ndarray, domain: str) -> np.ndarray:
     raise ValueError(f"Unsupported averaging domain: {domain}")
 
 
+def compute_mean_amplitude_spectrum(
+    contributions: list[SpectrumContribution],
+    *,
+    lowest_freq: float | None = None,
+    highest_freq: float | None = None,
+) -> AveragedAmplitudeSpectrum:
+    if len(contributions) == 0:
+        raise ValueError("No FFT contributions were available")
+
+    freq_low, freq_high = choose_frequency_window(
+        contributions,
+        lowest_freq=lowest_freq,
+        highest_freq=highest_freq,
+    )
+    freq_grid = build_common_grid(contributions, freq_low, freq_high)
+    interpolated = [interp_amplitude(c.fft_result.freq, c.fft_result.amplitude, freq_grid) for c in contributions]
+    stack = np.vstack(interpolated)
+    mean_amplitude = np.mean(stack, axis=0)
+
+    return AveragedAmplitudeSpectrum(
+        freq_grid=freq_grid,
+        mean_amplitude=mean_amplitude,
+        freq_low=float(freq_low),
+        freq_high=float(freq_high),
+        contributors=list(contributions),
+    )
+
+
 def compute_average_spectrum(
     contributions: list[SpectrumContribution],
     *,
@@ -222,13 +287,14 @@ def compute_average_spectrum(
     if len(contributions) == 0:
         raise ValueError("No FFT contributions were available")
 
-    freq_low, freq_high = choose_frequency_window(
+    averaged = compute_mean_amplitude_spectrum(
         contributions,
         lowest_freq=lowest_freq,
         highest_freq=highest_freq,
     )
-
-    freq_grid = build_common_grid(contributions, freq_low, freq_high)
+    freq_grid = averaged.freq_grid
+    freq_low = averaged.freq_low
+    freq_high = averaged.freq_high
 
     rel_low, rel_high = map(float, relative_range)
     if normalize_mode == "absolute":
