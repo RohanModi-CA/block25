@@ -3,15 +3,26 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
+import scipy.signal as sp_signal
 
 from .models import (
     AverageSpectrumResult,
+    AveragedAmplitudeSpectrum,
     PairFrequencyAnalysisResult,
+    PairWelchFrequencyAnalysisResult,
+    ProcessedSpectrumWindow,
     SignalRecord,
     SpectrumContribution,
     SpacingDataset,
 )
-from .signal import compute_complex_spectrogram, compute_one_sided_fft, preprocess_signal
+from .signal import compute_complex_spectrogram, compute_one_sided_fft, compute_welch_spectrum, preprocess_signal
+
+
+ABSOLUTE_ZERO_TOL = 1e-10
+
+
+def is_close_to_zero(value: float, *, tol: float = ABSOLUTE_ZERO_TOL) -> bool:
+    return (not np.isfinite(value)) or (abs(float(value)) <= float(tol))
 
 
 def compute_fft_contributions(
@@ -118,6 +129,87 @@ def analyze_spacing_dataset_for_display(
     return results
 
 
+def analyze_spacing_dataset_with_welch_for_display(
+    spacing_dataset: SpacingDataset,
+    *,
+    disabled_indices: list[int] | None = None,
+    longest: bool = False,
+    handlenan: bool = False,
+    welch_len_s: float = 20.0,
+    welch_overlap_fraction: float = 0.5,
+    sliding_len_s: float = 20.0,
+    min_samples: int = 10,
+) -> list[PairWelchFrequencyAnalysisResult]:
+    disabled = set(disabled_indices or [])
+    results: list[PairWelchFrequencyAnalysisResult] = []
+
+    spacing = spacing_dataset.spacing_matrix
+    T = spacing_dataset.track2.frame_times_s
+    n_pairs = int(spacing.shape[1])
+
+    for pair_idx in range(n_pairs):
+        if pair_idx in disabled:
+            continue
+
+        label = spacing_dataset.pair_labels[pair_idx] if pair_idx < len(spacing_dataset.pair_labels) else "?"
+        y = spacing[:, pair_idx]
+
+        processed, error_msg = preprocess_signal(
+            T,
+            y,
+            longest=longest,
+            handlenan=handlenan,
+            min_samples=min_samples,
+        )
+        if processed is None:
+            results.append(
+                PairWelchFrequencyAnalysisResult(
+                    pair_index=pair_idx,
+                    label=label,
+                    processed=None,
+                    welch_result=None,
+                    spectrogram_result=None,
+                    error_message=error_msg,
+                )
+            )
+            continue
+
+        welch_result = compute_welch_spectrum(
+            processed.y,
+            processed.Fs,
+            welch_len_s,
+            overlap_fraction=welch_overlap_fraction,
+        )
+        if welch_result is None:
+            results.append(
+                PairWelchFrequencyAnalysisResult(
+                    pair_index=pair_idx,
+                    label=label,
+                    processed=processed,
+                    welch_result=None,
+                    spectrogram_result=None,
+                    error_message="Welch window too short",
+                )
+            )
+            continue
+
+        spec_result = compute_complex_spectrogram(processed.y, processed.Fs, sliding_len_s)
+        spec_error = None if spec_result is not None else "window too short"
+
+        results.append(
+            PairWelchFrequencyAnalysisResult(
+                pair_index=pair_idx,
+                label=label,
+                processed=processed,
+                welch_result=welch_result,
+                spectrogram_result=spec_result,
+                spectrogram_error_message=spec_error,
+            )
+        )
+
+    return results
+
+
 def median_positive_step(x: np.ndarray) -> float | None:
     if x.size < 2:
         return None
@@ -157,25 +249,77 @@ def interp_amplitude(freq_src: np.ndarray, amp_src: np.ndarray, freq_dst: np.nda
     return np.interp(freq_dst, freq_src, amp_src)
 
 
+def slice_spectrum_window(freq: np.ndarray, amp: np.ndarray, low: float, high: float) -> tuple[np.ndarray, np.ndarray]:
+    freq = np.asarray(freq, dtype=float)
+    amp = np.asarray(amp, dtype=float)
+
+    if freq.ndim != 1 or amp.ndim != 1 or freq.size != amp.size:
+        raise ValueError("freq and amp must be 1D arrays of equal length")
+    if freq.size < 2:
+        raise ValueError("Need at least two spectrum samples")
+    if not np.all(np.isfinite(freq)) or not np.all(np.isfinite(amp)):
+        raise ValueError("freq and amp must be finite")
+    if high <= low:
+        raise ValueError("Window high must be greater than low")
+    if low < freq[0] or high > freq[-1]:
+        raise ValueError(
+            f"Requested window [{low:.6g}, {high:.6g}] Hz lies outside supported range "
+            f"[{freq[0]:.6g}, {freq[-1]:.6g}] Hz"
+        )
+
+    interior_mask = (freq > low) & (freq < high)
+    interior_freq = freq[interior_mask]
+    interior_amp = amp[interior_mask]
+
+    edge_freq = np.array([low, high], dtype=float)
+    edge_amp = np.interp(edge_freq, freq, amp)
+
+    if interior_freq.size == 0:
+        window_freq = edge_freq
+        window_amp = edge_amp
+    else:
+        window_freq = np.concatenate(([low], interior_freq, [high]))
+        window_amp = np.concatenate(([edge_amp[0]], interior_amp, [edge_amp[1]]))
+
+    if window_freq.size < 2:
+        raise ValueError("Window extraction produced too few samples")
+
+    return window_freq, window_amp
+
+
 def integral_over_window(freq: np.ndarray, amp: np.ndarray, low: float, high: float) -> float:
-    mask = (freq >= low) & (freq <= high)
-    if np.count_nonzero(mask) < 2:
-        return 0.0
-    return float(np.trapezoid(amp[mask], freq[mask]))
+    window_freq, window_amp = slice_spectrum_window(freq, amp, low, high)
+    return float(np.trapz(window_amp, window_freq))
 
 
-def denominator_too_small(denom: float, amp: np.ndarray, low: float, high: float) -> bool:
-    width = max(high - low, 1e-12)
-    amp_scale = float(np.nanmax(np.abs(amp))) if amp.size > 0 else 0.0
-    tol = 1e4 * np.finfo(float).eps * max(1.0, amp_scale * width)
-    return (not np.isfinite(denom)) or (abs(denom) <= tol)
+def process_spectrum_window(freq: np.ndarray, amp: np.ndarray, low: float, high: float) -> ProcessedSpectrumWindow:
+    window_freq, window_amp = slice_spectrum_window(freq, amp, low, high)
+    detrended = sp_signal.detrend(window_amp, type="linear")
+    shifted = detrended - float(np.min(detrended))
+    integral = float(np.trapz(shifted, window_freq))
+
+    return ProcessedSpectrumWindow(
+        low_hz=float(low),
+        high_hz=float(high),
+        freq=window_freq,
+        raw_amplitude=window_amp,
+        detrended_amplitude=detrended,
+        shifted_amplitude=shifted,
+        integral=integral,
+    )
 
 
-def normalize_spectrum(freq, amp, *, norm_low: float, norm_high: float) -> np.ndarray | None:
-    denom = integral_over_window(freq, amp, norm_low, norm_high)
-    if denominator_too_small(denom, amp, norm_low, norm_high):
+def normalize_spectrum(
+    freq: np.ndarray,
+    amp: np.ndarray,
+    *,
+    norm_low: float,
+    norm_high: float,
+) -> np.ndarray | None:
+    processed_window = process_spectrum_window(freq, amp, norm_low, norm_high)
+    if is_close_to_zero(processed_window.integral):
         return None
-    return amp / denom
+    return amp / processed_window.integral
 
 
 def choose_frequency_window(
@@ -210,6 +354,34 @@ def average_spectra(normalized_stack: np.ndarray, domain: str) -> np.ndarray:
     raise ValueError(f"Unsupported averaging domain: {domain}")
 
 
+def compute_mean_amplitude_spectrum(
+    contributions: list[SpectrumContribution],
+    *,
+    lowest_freq: float | None = None,
+    highest_freq: float | None = None,
+) -> AveragedAmplitudeSpectrum:
+    if len(contributions) == 0:
+        raise ValueError("No FFT contributions were available")
+
+    freq_low, freq_high = choose_frequency_window(
+        contributions,
+        lowest_freq=lowest_freq,
+        highest_freq=highest_freq,
+    )
+    freq_grid = build_common_grid(contributions, freq_low, freq_high)
+    interpolated = [interp_amplitude(c.fft_result.freq, c.fft_result.amplitude, freq_grid) for c in contributions]
+    stack = np.vstack(interpolated)
+    mean_amplitude = np.mean(stack, axis=0)
+
+    return AveragedAmplitudeSpectrum(
+        freq_grid=freq_grid,
+        mean_amplitude=mean_amplitude,
+        freq_low=float(freq_low),
+        freq_high=float(freq_high),
+        contributors=list(contributions),
+    )
+
+
 def compute_average_spectrum(
     contributions: list[SpectrumContribution],
     *,
@@ -222,13 +394,14 @@ def compute_average_spectrum(
     if len(contributions) == 0:
         raise ValueError("No FFT contributions were available")
 
-    freq_low, freq_high = choose_frequency_window(
+    averaged = compute_mean_amplitude_spectrum(
         contributions,
         lowest_freq=lowest_freq,
         highest_freq=highest_freq,
     )
-
-    freq_grid = build_common_grid(contributions, freq_low, freq_high)
+    freq_grid = averaged.freq_grid
+    freq_low = averaged.freq_low
+    freq_high = averaged.freq_high
 
     rel_low, rel_high = map(float, relative_range)
     if normalize_mode == "absolute":
@@ -259,7 +432,7 @@ def compute_average_spectrum(
             warnings.warn(
                 f"Skipping {contrib.record.signal_kind} id {contrib.record.entity_id} from "
                 f"dataset '{contrib.record.dataset_name}' because normalization denominator "
-                f"in [{norm_low:.6g}, {norm_high:.6g}] Hz was zero or near-zero"
+                f"in [{norm_low:.6g}, {norm_high:.6g}] Hz was <= {ABSOLUTE_ZERO_TOL:.0e} after detrend/zero-floor"
             )
             continue
         normalized_rows.append(amp_norm)

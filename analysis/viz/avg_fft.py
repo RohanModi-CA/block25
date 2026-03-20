@@ -13,6 +13,7 @@ from plotting.common import render_figure
 from plotting.frequency import plot_average_spectrum
 from tools.cli import (
     add_average_domain_args,
+    add_bond_filter_args,
     add_colormap_arg,
     add_normalization_args,
     add_output_args,
@@ -20,8 +21,14 @@ from tools.cli import (
     add_signal_processing_args,
     add_track_data_root_arg,
 )
-from tools.selection import build_configured_bond_signals, load_dataset_selection
+from tools.selection import (
+    build_configured_bond_signals,
+    collect_display_bond_numbers,
+    filter_signal_records_by_display_bonds,
+    load_dataset_selection,
+)
 from tools.spectral import (
+    ABSOLUTE_ZERO_TOL,
     compute_average_spectrum,
     compute_fft_contributions,
     compute_reference_average_spectrum,
@@ -30,7 +37,7 @@ from tools.spectral import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Average normalized FFT spectra across datasets using Track2 permanence data.",
+        description="Average normalized FFT spectra across selected configured global bonds using Track2 permanence data.",
     )
     parser.add_argument("config_json", help="Dataset-selection JSON file.")
     add_track_data_root_arg(parser)
@@ -38,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_average_domain_args(parser)
     add_plot_scale_args(parser)
     add_signal_processing_args(parser)
+    add_bond_filter_args(parser)
     add_colormap_arg(parser)
     add_output_args(parser, include_title=True)
 
@@ -54,6 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Render the averaged spectrum as a 2D frequency image instead of a 1D curve.",
     )
     return parser
+
+
+def _format_bond_list(display_bonds: list[int]) -> str:
+    if len(display_bonds) == 0:
+        return "[]"
+    if len(display_bonds) <= 12:
+        return "[" + ", ".join(str(v) for v in display_bonds) + "]"
+    head = ", ".join(str(v) for v in display_bonds[:10])
+    return f"[{head}, ...] ({len(display_bonds)} total)"
 
 
 def main() -> int:
@@ -76,13 +93,24 @@ def main() -> int:
             track_data_root=args.track_data_root,
             allow_duplicate_ids=args.allow_duplicate_bonds,
         )
+        available_display_bonds = collect_display_bond_numbers(records)
+        records = filter_signal_records_by_display_bonds(
+            records,
+            only_bonds=args.only_bonds,
+            exclude_bonds=args.exclude_bonds,
+            parity=args.bond_parity,
+        )
+        selected_display_bonds = collect_display_bond_numbers(records)
+        if len(records) == 0:
+            raise ValueError("Bond selection removed all configured bond contributors")
+
         contributions = compute_fft_contributions(
             records,
             longest=args.longest,
             handlenan=args.handlenan,
         )
         if len(contributions) == 0:
-            raise ValueError("No spectra were accepted from the provided config")
+            raise ValueError("No spectra were accepted from the selected bond contributors")
 
         result = compute_average_spectrum(
             contributions,
@@ -105,6 +133,7 @@ def main() -> int:
 
         n_contributors = len(result.contributors)
         n_datasets = len({contrib.record.dataset_name for contrib in result.contributors})
+        accepted_display_bonds = sorted({int(contrib.record.entity_id) + 1 for contrib in result.contributors})
 
         if args.title:
             title = args.title
@@ -115,13 +144,18 @@ def main() -> int:
                 norm_desc = f"relative [{title_range[0]}, {title_range[1]}] Hz"
             title = (
                 f"Average FFT | contributors={n_contributors} | datasets={n_datasets} | "
-                f"avg={args.average_domain} | norm={norm_desc}"
+                f"bonds={len(accepted_display_bonds)} | avg={args.average_domain} | norm={norm_desc}"
             )
 
+        print(f"Available configured display bonds: {_format_bond_list(available_display_bonds)}")
+        print(f"Selected display bonds: {_format_bond_list(selected_display_bonds)}")
+        print(f"Accepted display bonds: {_format_bond_list(accepted_display_bonds)}")
         print(f"Accepted contributors: {n_contributors}")
         print(f"Unique datasets: {n_datasets}")
         print(f"Frequency window: [{result.freq_low:.6f}, {result.freq_high:.6f}] Hz")
         print(f"Normalization window: [{result.norm_low:.6f}, {result.norm_high:.6f}] Hz")
+        print("Normalization band processing: linear detrend -> zero-floor -> integrate area")
+        print(f"Near-zero denominator threshold: {ABSOLUTE_ZERO_TOL:.0e}")
         print(f"Common grid points: {len(result.freq_grid)}")
         print(f"Display mode: {'full image' if args.full_image else 'curve'}")
         if args.full_image and args.plot_scale == "linear":

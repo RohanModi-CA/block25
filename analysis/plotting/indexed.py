@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 from tools.models import LocalizationProfile
 
@@ -47,6 +47,7 @@ def plot_localization_profiles(
     profiles: list[LocalizationProfile],
     *,
     xlabel: str,
+    ylabel: str = "Norm. Amplitude",
     title: str | None = None,
     line_color: str | None = None,
 ):
@@ -96,6 +97,7 @@ def plot_localization_profiles(
             line_kwargs["color"] = line_color
 
         ax.plot(x_vals, y_vals, **line_kwargs)
+        ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.35)
 
         if np.any(y_errs > 0):
             band_kwargs = dict(alpha=0.2)
@@ -110,7 +112,7 @@ def plot_localization_profiles(
             )
 
         ax.set_title(f"Peak {profile.peak_index}: {profile.frequency} Hz")
-        ax.set_ylabel("Norm. Amplitude")
+        ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.3)
 
         if xticks.size > 0:

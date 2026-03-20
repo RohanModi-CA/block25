@@ -121,3 +121,51 @@ def add_plot_scale_args(parser: argparse.ArgumentParser) -> None:
         help="Use a log / dB display scale.",
     )
     parser.set_defaults(plot_scale="linear")
+
+
+def add_peak_integration_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--integration-window-width",
+        type=float,
+        default=0.1,
+        help="Half-width in Hz for the peak-integration windows. Default: 0.1",
+    )
+    parser.add_argument(
+        "--normalization-multiplier",
+        type=float,
+        default=4.0,
+        help="ROI padding multiplier applied to the integration window width. Default: 4",
+    )
+
+
+def add_bond_filter_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--only-bonds",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Keep only these 1-based global bond numbers, e.g. --only-bonds 1 2 9.",
+    )
+    parser.add_argument(
+        "--exclude-bonds",
+        type=int,
+        nargs="+",
+        default=[],
+        help="Exclude these 1-based global bond numbers after any other bond filtering.",
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--odd-bonds",
+        dest="bond_parity",
+        action="store_const",
+        const="odd",
+        help="Keep only odd 1-based bond numbers.",
+    )
+    group.add_argument(
+        "--even-bonds",
+        dest="bond_parity",
+        action="store_const",
+        const="even",
+        help="Keep only even 1-based bond numbers.",
+    )
+    parser.set_defaults(bond_parity=None)
