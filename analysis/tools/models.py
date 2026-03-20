@@ -78,6 +78,16 @@ class SpectrogramResult:
 
 
 @dataclass(frozen=True)
+class WelchSpectrumResult:
+    freq: np.ndarray
+    power: np.ndarray
+    amplitude: np.ndarray
+    nperseg: int
+    noverlap: int
+    nfft: int
+
+
+@dataclass(frozen=True)
 class TargetFrequencyResult:
     target_freq: float
     selected_freq: float
@@ -115,11 +125,33 @@ class AveragedAmplitudeSpectrum:
 
 
 @dataclass(frozen=True)
+class ProcessedSpectrumWindow:
+    low_hz: float
+    high_hz: float
+    freq: np.ndarray
+    raw_amplitude: np.ndarray
+    detrended_amplitude: np.ndarray
+    shifted_amplitude: np.ndarray
+    integral: float
+
+
+@dataclass(frozen=True)
 class PairFrequencyAnalysisResult:
     pair_index: int
     label: str
     processed: ProcessedSignal | None
     fft_result: FFTResult | None
+    spectrogram_result: SpectrogramResult | None
+    error_message: str | None = None
+    spectrogram_error_message: str | None = None
+
+
+@dataclass(frozen=True)
+class PairWelchFrequencyAnalysisResult:
+    pair_index: int
+    label: str
+    processed: ProcessedSignal | None
+    welch_result: WelchSpectrumResult | None
     spectrogram_result: SpectrogramResult | None
     error_message: str | None = None
     spectrogram_error_message: str | None = None

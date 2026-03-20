@@ -39,6 +39,7 @@ analysis/
     ├── localize_peaks.py
     ├── localize_sitepeaks.py
     ├── see_fft.py
+    ├── see_welch_fft.py
     ├── see_positions.py
     ├── see_site_amplitudes.py
     └── spacing_timeseries.py
@@ -50,6 +51,7 @@ Run them from the `analysis/` directory, for example:
 
 ```bash
 python3 viz/see_fft.py IMG_0584
+python3 viz/see_welch_fft.py IMG_0584
 python3 viz/avg_fft.py configs/datasets.json --normalize relative
 python3 viz/avg_fft_sites.py configs/datasets.json peaks.csv --normalize relative
 python3 viz/localize_peaks.py configs/datasets.json peaks.csv --normalize relative

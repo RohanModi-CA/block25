@@ -233,3 +233,52 @@ def build_configured_site_signals(
             seen_ids.add(record.entity_id)
 
     return records
+
+
+def _normalize_display_bond_numbers(values: list[int] | None, *, arg_name: str) -> list[int] | None:
+    if values is None:
+        return None
+
+    out: list[int] = []
+    for value in values:
+        if int(value) < 1:
+            raise ValueError(f"{arg_name} values must be positive 1-based bond numbers")
+        out.append(int(value))
+    return sorted(set(out))
+
+
+def collect_display_bond_numbers(records: list[SignalRecord]) -> list[int]:
+    return sorted({int(record.entity_id) + 1 for record in records})
+
+
+def filter_signal_records_by_display_bonds(
+    records: list[SignalRecord],
+    *,
+    only_bonds: list[int] | None = None,
+    exclude_bonds: list[int] | None = None,
+    parity: str | None = None,
+) -> list[SignalRecord]:
+    only_set = set(_normalize_display_bond_numbers(only_bonds, arg_name="--only-bonds") or [])
+    exclude_set = set(_normalize_display_bond_numbers(exclude_bonds, arg_name="--exclude-bonds") or [])
+
+    if only_set and (only_set & exclude_set):
+        overlap = sorted(only_set & exclude_set)
+        raise ValueError(f"Bond numbers cannot appear in both --only-bonds and --exclude-bonds: {overlap}")
+
+    if parity not in {None, "odd", "even"}:
+        raise ValueError("parity must be one of None, 'odd', or 'even'")
+
+    filtered: list[SignalRecord] = []
+    for record in records:
+        display_bond = int(record.entity_id) + 1
+        if only_set and display_bond not in only_set:
+            continue
+        if display_bond in exclude_set:
+            continue
+        if parity == "odd" and display_bond % 2 == 0:
+            continue
+        if parity == "even" and display_bond % 2 != 0:
+            continue
+        filtered.append(record)
+
+    return filtered
